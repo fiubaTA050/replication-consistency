@@ -1,0 +1,8 @@
+CREATE TABLE items (
+    id   SERIAL PRIMARY KEY,
+    name text NOT NULL
+);
+
+ALTER TABLE items REPLICA IDENTITY FULL;
+
+CREATE PUBLICATION items_pub FOR TABLE items;

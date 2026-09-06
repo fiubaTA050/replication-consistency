@@ -1,0 +1,45 @@
+services:
+  postgres-a:
+    container_name: postgres-a
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: appdb
+      PGPASSWORD: postgres
+    # Postgres A will wait for a wal subscriber to send the ack up to wal_sender_timeout
+    command: postgres -c wal_level=logical -c wal_sender_timeout=120s
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-a-data:/var/lib/postgresql/data
+      - ./a:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      # "healthy" only once the init scripts finished
+      test: pg_isready -U postgres -d appdb
+      interval: 1s
+      timeout: 5s
+      retries: 5
+      start_period: 1s
+
+  postgres-b:
+    container_name: postgres-b
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: appdb
+      PGPASSWORD: postgres
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres-b-data:/var/lib/postgresql/data
+      - ./b:/docker-entrypoint-initdb.d:ro
+    depends_on:
+      postgres-a:
+        condition: service_healthy
+
+# Named volumes: they survive `stop`/`start` and are removed by `down -v`,
+volumes:
+  postgres-a-data:
+  postgres-b-data:
