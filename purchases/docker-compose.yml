@@ -1,0 +1,57 @@
+services:
+  postgres:
+    container_name: purchases-postgres
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: appdb
+    volumes:
+      - purchases-postgres-data:/var/lib/postgresql/data
+      - ./initdb:/docker-entrypoint-initdb.d:ro
+    networks:
+      - backend
+    healthcheck:
+      test: pg_isready -U postgres -d appdb
+      interval: 1s
+      timeout: 5s
+      retries: 10
+      start_period: 1s
+
+  app:
+    container_name: purchases-app
+    image: node:24-alpine
+    working_dir: /app
+    command: node --watch src/server.js
+    volumes:
+      - ./:/app:ro
+    networks:
+      - backend
+      - egress
+    user: node
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  tunnel:
+    container_name: purchases-tunnel
+    image: cloudflare/cloudflared:latest
+    command: tunnel --no-autoupdate --url http://app:3000
+    networks:
+      - backend
+      - egress
+    depends_on:
+      - app
+
+networks:
+  backend:
+    internal: true
+  egress:
+
+volumes:
+  purchases-postgres-data:

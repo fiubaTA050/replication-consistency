@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="es-AR">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Compras</title>
+    <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<header>
+    <h1>Compras</h1>
+    <label for="userId">Nombre de usuario</label>
+    <input id="userId" type="text" placeholder="escribí tu nombre de usuario" autocomplete="off">
+</header>
+
+<dialog id="comment-dialog">
+    <form id="comment-form" method="dialog">
+        <h2 id="dialog-product"></h2>
+        <label for="comment">Comentario</label>
+        <input id="comment" type="text" placeholder="¿por qué lo comprás?" autocomplete="off">
+        <div class="actions">
+            <button value="ok" type="submit">Confirmar compra</button>
+            <button value="cancel" type="submit" class="secondary">Cancelar</button>
+        </div>
+    </form>
+</dialog>
+
+<section id="pending" hidden>
+    <h2>Compra en curso</h2>
+    <p id="pending-product" class="name"></p>
+    <p class="meta">Clave de idempotencia</p>
+    <code id="pending-key"></code>
+    <ul id="attempts" class="log"></ul>
+    <div class="actions">
+        <button id="retry" type="button">Reintentar</button>
+        <button id="cancel" type="button" class="secondary">Cerrar</button>
+    </div>
+</section>
+
+<main>
+    <section>
+        <h2>Productos</h2>
+        <p id="products-status" class="status"></p>
+        <ul id="products" class="list"></ul>
+    </section>
+
+    <section>
+        <h2>Mis compras</h2>
+        <button id="refresh" type="button">Actualizar</button>
+        <p id="purchases-status" class="status"></p>
+        <ul id="purchases" class="list"></ul>
+    </section>
+</main>
+
+<div id="toast" hidden></div>
+<script src="/app.js"></script>
+</body>
+</html>

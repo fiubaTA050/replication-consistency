@@ -4,7 +4,7 @@ Compare different types of replication strategies and how it impacts consistency
 
 ---
 
-### Prerequisites
+## Prerequisites
 
 - Docker with Compose v2
 - Node.js 18+
@@ -54,6 +54,23 @@ UPDATE items SET name = 'new name' WHERE id = 1;
 ```sql
 SELECT * FROM items
 \watch 1
+```
+
+## Purchases server
+
+```
+cd purchases
+# start the server
+docker compose up -d
+
+# restart the app after some code changes
+docker compose restart app
+
+# kill the server and data
+docker compose down -v --remove-orphans
+
+# query the db
+docker exec -it purchases-postgres psql -U postgres -d appdb
 ```
 
 ## WAL reader
