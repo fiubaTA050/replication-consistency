@@ -1,7 +1,5 @@
 import pg from 'pg';
 
-const seenIdempotencyKeys = new Set();
-
 const pool = new pg.Pool({
     host: 'postgres',
     port: 5432,
@@ -36,11 +34,6 @@ export async function listPurchases(userId) {
 }
 
 export async function createPurchase({userId, productId, comment, idempotencyKey}) {
-    if (seenIdempotencyKeys.has(idempotencyKey)) {
-        console.log(`purchase replayed idempotencyKey=${idempotencyKey}`);
-        return true;
-    }
-
     const client = await pool.connect();
     try {
         await client.query('BEGIN ISOLATION LEVEL SERIALIZABLE');
@@ -54,14 +47,22 @@ export async function createPurchase({userId, productId, comment, idempotencyKey
             return false;
         }
 
+        const {rows: inserted} = await client.query(
+            `INSERT INTO purchases (user_id, product_id, comment, idempotency_key)
+             VALUES ($1, $2, $3, $4)
+             ON CONFLICT ON CONSTRAINT purchases_idempotency_key_uniq DO NOTHING
+             RETURNING id`,
+            [userId, productId, comment || null, idempotencyKey || null],
+        );
+        if (inserted.length === 0) {
+            await client.query('ROLLBACK');
+            console.log(`purchase replayed idempotencyKey=${idempotencyKey}`);
+            return true;
+        }
+
         await client.query(
             'UPDATE products SET stock = stock - 1 WHERE id = $1',
             [productId],
-        );
-
-        await client.query(
-            'INSERT INTO purchases (user_id, product_id, comment) VALUES ($1, $2, $3)',
-            [userId, productId, comment || null],
         );
 
         failRandomly();
@@ -69,9 +70,6 @@ export async function createPurchase({userId, productId, comment, idempotencyKey
         await notify(userId, products[0], comment);
 
         await client.query('COMMIT');
-        if (idempotencyKey) {
-            seenIdempotencyKeys.add(idempotencyKey);
-        }
         return true;
     } catch (error) {
         await client.query('ROLLBACK');

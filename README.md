@@ -69,6 +69,33 @@ docker compose down -v --remove-orphans
 docker exec -it purchases-postgres psql -U postgres -d appdb
 ```
 
+> El esquema vive en `purchases/initdb/`, que solo corre cuando el volumen esta vacio.
+> Despues de cambiarlo hay que recrear la base: `docker compose down -v --remove-orphans && docker compose up -d`.
+
+### Idempotencia
+
+El cliente manda un `Idempotency-Key` por compra y reintenta hasta 3 veces.
+La clave se guarda en la misma fila de `purchases`, protegida por
+`UNIQUE (user_id, idempotency_key)`, y se escribe dentro de la misma transaccion
+que descuenta el stock:
+
+- si la transaccion falla (`failRandomly`, ntfy caido, error de serializacion) el
+  rollback se lleva la clave, asi que el reintento vuelve a intentar la compra;
+- si la transaccion commitea, el reintento choca contra el `UNIQUE`, el
+  `ON CONFLICT DO NOTHING` no inserta nada y el servidor responde 201 sin volver
+  a descontar stock ni a notificar.
+
+Marcar la clave en memoria (un `Set` en el proceso) seria una escritura doble:
+dos almacenamientos que pueden divergir. Si el proceso commitea y muere antes de
+marcar el `Set` el reintento duplica la compra; si marca el `Set` y el commit
+falla, la compra se pierde para siempre. Ademas cada replica del servidor tiene
+su propio `Set`, asi que basta con que el reintento caiga en otra instancia para
+que la deduplicacion no exista. Con la clave en la base, el efecto y su marca de
+deduplicacion son la misma escritura atomica.
+
+La llamada a ntfy sigue siendo una escritura doble: se manda antes del `COMMIT`,
+asi que puede notificarse una compra que despues no queda registrada.
+
 ## WAL reader
 
 `wal-reader/` opens a logical replication connection to **postgres A**, prints
