@@ -1,13 +1,9 @@
-# Replication and consistency on distributed systems
+# Replicación y consistencia en sistemas distribuidos
 
-Compare different types of replication strategies and how it impacts consistency, availability and latency.
-
----
-
-## Prerequisites
+## Dependencias
 
 - Docker with Compose v2
-- Node.js 18+
+- Node.js 24
 
 ## Postgres Replication
 
@@ -56,7 +52,7 @@ SELECT * FROM items
 \watch 1
 ```
 
-## Purchases server
+## Server
 
 ```
 cd purchases
