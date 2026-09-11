@@ -69,6 +69,26 @@ docker compose down -v --remove-orphans
 docker exec -it purchases-postgres psql -U postgres -d appdb
 ```
 
+### Push notifications (WAL consumer)
+
+The purchase transaction only writes to postgres. `purchases/src/notifier.js` runs as a separate process
+(the `notifier` compose service), streams every committed `INSERT` on `purchases` (publication `purchases_pub`,
+slot `purchases_notifier`) and sends the push notification to ntfy. Rolled back purchases never reach the WAL stream,
+so they are never notified.
+
+Same strategy as the WAL reader: the LSN is acknowledged manually, but only **after every 10 purchases**.
+If the notifier restarts (`docker compose restart notifier`) before the 10th purchase, postgres replays every
+purchase since the last ACK and the notifications are sent again (at-least-once delivery).
+
+```bash
+# follow the notifier logs
+docker compose logs -f notifier
+```
+
+Since the notifier doesn't answer keepalives, the purchases postgres runs with `wal_sender_timeout=0`.
+
+The publication and slot are created by `initdb/03_replication.sql`: run `docker compose down -v` once so they get created.
+
 ## WAL reader
 
 `wal-reader/` opens a logical replication connection to **postgres A**, prints

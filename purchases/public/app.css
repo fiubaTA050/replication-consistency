@@ -151,28 +151,20 @@ header label + label {
     margin-top: 0.6rem;
 }
 
-#pending {
-    margin-top: 1rem;
-    padding: 0.9rem;
-    background: var(--card);
-    border: 1px solid var(--accent);
-    border-radius: 8px;
-}
-
-#pending h2 {
-    margin-top: 0;
-}
-
-#pending p {
+dialog p {
     margin: 0 0 0.25rem;
 }
 
-#pending code {
+dialog code {
     display: block;
     margin-bottom: 0.6rem;
     font-size: 0.8rem;
     word-break: break-all;
     color: var(--accent);
+}
+
+input[readonly] {
+    color: var(--muted);
 }
 
 .log {

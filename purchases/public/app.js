@@ -3,23 +3,22 @@ const RETRY_DELAY = 1000;
 
 const userIdInput = document.getElementById('userId');
 const commentInput = document.getElementById('comment');
-const commentDialog = document.getElementById('comment-dialog');
+const purchaseDialog = document.getElementById('purchase-dialog');
 const dialogProduct = document.getElementById('dialog-product');
-const commentForm = document.getElementById('comment-form');
+const dialogKey = document.getElementById('dialog-key');
+const purchaseForm = document.getElementById('purchase-form');
+const attemptsList = document.getElementById('attempts');
+const purchaseButton = document.getElementById('purchase');
+const cancelButton = document.getElementById('cancel');
 const productsList = document.getElementById('products');
 const purchasesList = document.getElementById('purchases');
 const productsStatus = document.getElementById('products-status');
 const purchasesStatus = document.getElementById('purchases-status');
 const refreshButton = document.getElementById('refresh');
 const toast = document.getElementById('toast');
-const pendingPanel = document.getElementById('pending');
-const pendingProduct = document.getElementById('pending-product');
-const pendingKey = document.getElementById('pending-key');
-const attemptsList = document.getElementById('attempts');
-const retryButton = document.getElementById('retry');
-const cancelButton = document.getElementById('cancel');
 
 let pending = null;
+let sending = false;
 let toastTimer = null;
 
 userIdInput.value = localStorage.getItem('userId') ?? '';
@@ -30,8 +29,21 @@ userIdInput.addEventListener('input', () => {
 });
 
 refreshButton.addEventListener('click', loadPurchases);
-retryButton.addEventListener('click', () => send());
-cancelButton.addEventListener('click', clearPending);
+
+purchaseForm.addEventListener('submit', (event) => {
+    if (event.submitter?.value === 'ok') {
+        event.preventDefault();
+        send();
+    }
+});
+purchaseDialog.addEventListener('cancel', (event) => {
+    if (sending) {
+        event.preventDefault();
+    }
+});
+purchaseDialog.addEventListener('close', () => {
+    pending = null;
+});
 
 function newKey() {
     return crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -64,10 +76,10 @@ function logAttempt(message) {
     attemptsList.append(entry);
 }
 
-function clearPending() {
-    pending = null;
-    pendingPanel.hidden = true;
-    attemptsList.replaceChildren();
+function setSending(value) {
+    sending = value;
+    purchaseButton.disabled = value;
+    cancelButton.disabled = value;
 }
 
 async function request(path, options) {
@@ -112,46 +124,39 @@ function renderProduct(product) {
     return item;
 }
 
-function askComment(product) {
-    dialogProduct.textContent = product.name;
-    commentInput.value = '';
-    commentDialog.showModal();
-    return new Promise((resolve) => {
-        commentForm.onsubmit = (event) => resolve(event.submitter.value === 'ok' ? commentInput.value.trim() : null);
-        commentDialog.oncancel = () => resolve(null);
-    });
-}
-
-async function buy(product) {
+function buy(product) {
     const userId = userIdInput.value.trim();
     if (!userId) {
         userIdInput.focus();
         showToast('Escribí tu nombre de usuario');
         return;
     }
-    const comment = await askComment(product);
-    if (comment === null) {
-        return;
-    }
+    // one key per purchase: every click on "Comprar de nuevo" repeats the same request with the same key
     pending = {
         userId,
         productId: product.id,
         productName: product.name,
-        comment,
+        comment: null,
         key: newKey(),
     };
-    pendingProduct.textContent = product.name;
-    pendingKey.textContent = pending.key;
+    dialogProduct.textContent = product.name;
+    dialogKey.textContent = pending.key;
+    commentInput.value = '';
+    commentInput.readOnly = false;
     attemptsList.replaceChildren();
-    pendingPanel.hidden = false;
-    send();
+    purchaseButton.textContent = 'Confirmar compra';
+    setSending(false);
+    purchaseDialog.showModal();
 }
 
 async function send() {
-    if (!pending) {
+    const purchase = pending;
+    if (!purchase || sending) {
         return;
     }
-    retryButton.disabled = true;
+    purchase.comment ??= commentInput.value.trim();
+    commentInput.readOnly = true;
+    setSending(true);
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
         logAttempt(`Intento ${attempt} de ${MAX_ATTEMPTS}…`);
         try {
@@ -159,18 +164,17 @@ async function send() {
                 method: 'POST',
                 headers: {
                     'content-type': 'application/json',
-                    'Idempotency-Key': pending.key,
+                    'Idempotency-Key': purchase.key,
                 },
                 body: JSON.stringify({
-                    userId: pending.userId,
-                    productId: pending.productId,
-                    comment: pending.comment,
+                    userId: purchase.userId,
+                    productId: purchase.productId,
+                    comment: purchase.comment,
                 }),
             });
-            logAttempt(`Intento ${attempt}: compra registrada`);
-            showToast(`Compraste ${pending.productName}`);
-            pending = null;
-            retryButton.disabled = true;
+            showToast(`Compraste ${purchase.productName}`);
+            setSending(false);
+            purchaseDialog.close();
             await Promise.all([loadProducts(), loadPurchases()]);
             return;
         } catch (error) {
@@ -182,7 +186,8 @@ async function send() {
     }
     logAttempt(`Se agotaron los ${MAX_ATTEMPTS} intentos`);
     showToast('No se pudo completar la compra');
-    retryButton.disabled = false;
+    purchaseButton.textContent = 'Comprar de nuevo';
+    setSending(false);
     await Promise.all([loadProducts(), loadPurchases()]);
 }
 

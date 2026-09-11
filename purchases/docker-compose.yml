@@ -6,6 +6,7 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: appdb
+    command: postgres -c wal_level=logical -c wal_sender_timeout=0
     volumes:
       - purchases-postgres-data:/var/lib/postgresql/data
       - ./initdb:/docker-entrypoint-initdb.d:ro
@@ -23,6 +24,26 @@ services:
     image: node:24-alpine
     working_dir: /app
     command: node --watch src/server.js
+    volumes:
+      - ./:/app:ro
+    networks:
+      - backend
+      - egress
+    user: node
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  notifier:
+    container_name: purchases-notifier
+    image: node:24-alpine
+    working_dir: /app
+    command: node --watch src/notifier.js
     volumes:
       - ./:/app:ro
     networks:

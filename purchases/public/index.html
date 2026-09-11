@@ -13,29 +13,20 @@
     <input id="userId" type="text" placeholder="escribí tu nombre de usuario" autocomplete="off">
 </header>
 
-<dialog id="comment-dialog">
-    <form id="comment-form" method="dialog">
+<dialog id="purchase-dialog">
+    <form id="purchase-form" method="dialog">
         <h2 id="dialog-product"></h2>
         <label for="comment">Comentario</label>
         <input id="comment" type="text" placeholder="¿por qué lo comprás?" autocomplete="off">
+        <p class="meta">Clave de idempotencia</p>
+        <code id="dialog-key"></code>
+        <ul id="attempts" class="log"></ul>
         <div class="actions">
-            <button value="ok" type="submit">Confirmar compra</button>
-            <button value="cancel" type="submit" class="secondary">Cancelar</button>
+            <button id="purchase" value="ok" type="submit">Confirmar compra</button>
+            <button id="cancel" value="cancel" type="submit" class="secondary">Cancelar</button>
         </div>
     </form>
 </dialog>
-
-<section id="pending" hidden>
-    <h2>Compra en curso</h2>
-    <p id="pending-product" class="name"></p>
-    <p class="meta">Clave de idempotencia</p>
-    <code id="pending-key"></code>
-    <ul id="attempts" class="log"></ul>
-    <div class="actions">
-        <button id="retry" type="button">Reintentar</button>
-        <button id="cancel" type="button" class="secondary">Cerrar</button>
-    </div>
-</section>
 
 <main>
     <section>
