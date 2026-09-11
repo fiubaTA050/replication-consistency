@@ -23,6 +23,8 @@ services:
     image: node:24-alpine
     working_dir: /app
     command: node --watch src/server.js
+    ports:
+      - "3000:3000"
     volumes:
       - ./:/app:ro
     networks:
