@@ -63,10 +63,9 @@ export async function createPurchase({userId, productId, comment, idempotencyKey
             'INSERT INTO purchases (user_id, product_id, comment) VALUES ($1, $2, $3)',
             [userId, productId, comment || null],
         );
-
-        failRandomly();
-
+        
         await client.query('COMMIT');
+
         if (idempotencyKey) {
             seenIdempotencyKeys.add(idempotencyKey);
         }
@@ -76,12 +75,6 @@ export async function createPurchase({userId, productId, comment, idempotencyKey
         throw error;
     } finally {
         client.release();
-    }
-}
-
-function failRandomly() {
-    if (Math.random() < 0.7) {
-        throw new Error('random failure');
     }
 }
 
