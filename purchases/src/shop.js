@@ -1,7 +1,5 @@
 import pg from 'pg';
 
-const seenIdempotencyKeys = new Set();
-
 const pool = new pg.Pool({
     host: 'postgres',
     port: 5432,
@@ -35,22 +33,14 @@ export async function listPurchases(userId) {
     return rows;
 }
 
-export async function createPurchase({userId, productId, comment, idempotencyKey}) {
-    if (seenIdempotencyKeys.has(idempotencyKey)) {
-        console.log(`purchase replayed idempotencyKey=${idempotencyKey}`);
-        return true;
-    }
-
+export async function createPurchase({userId, productId, comment}) {
     const client = await pool.connect();
     try {
-        await client.query('BEGIN ISOLATION LEVEL SERIALIZABLE');
-
         const {rows: products} = await client.query(
             'SELECT id, name, price, stock FROM products WHERE id = $1',
             [productId],
         );
         if (products.length === 0 || products[0].stock <= 0) {
-            await client.query('ROLLBACK');
             return false;
         }
 
@@ -64,39 +54,9 @@ export async function createPurchase({userId, productId, comment, idempotencyKey
             [userId, productId, comment || null],
         );
 
-        failRandomly();
-
-        await notify(userId, products[0], comment);
-
-        await client.query('COMMIT');
-        if (idempotencyKey) {
-            seenIdempotencyKeys.add(idempotencyKey);
-        }
         return true;
-    } catch (error) {
-        await client.query('ROLLBACK');
-        throw error;
     } finally {
         client.release();
-    }
-}
-
-function failRandomly() {
-    if (Math.random() < 0.7) {
-        throw new Error('random failure');
-    }
-}
-
-async function notify(userId, product, comment) {
-    const detail = comment ? ` - ${comment}` : '';
-    const response = await fetch('https://ntfy.sh/ta050', {
-        method: 'POST',
-        headers: {Title: 'Nueva compra', Tags: 'shopping_cart'},
-        body: `${userId} compro ${product.name} ($${product.price})${detail}`,
-        signal: AbortSignal.timeout(5000),
-    });
-    if (!response.ok) {
-        throw new Error(`ntfy respondio ${response.status}`);
     }
 }
 

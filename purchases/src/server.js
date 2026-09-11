@@ -22,7 +22,7 @@ const server = http.createServer(async (req, res) => {
             return await getPurchases(res, url.searchParams.get('userId'));
         }
         if (req.method === 'POST' && url.pathname === '/api/purchases') {
-            return await postPurchase(res, await readJson(req), req.headers['idempotency-key']);
+            return await postPurchase(res, await readJson(req));
         }
         if (req.method === 'GET') {
             return await serveStatic(res, url.pathname);
@@ -41,17 +41,17 @@ async function getPurchases(res, userId) {
     sendJson(res, 200, await listPurchases(userId));
 }
 
-async function postPurchase(res, body, idempotencyKey) {
+async function postPurchase(res, body) {
     const userId = typeof body?.userId === 'string' ? body.userId.trim() : '';
     const productId = Number(body?.productId);
     const comment = typeof body?.comment === 'string' ? body.comment.trim() : '';
-    console.log(`POST /api/purchases user=${userId} product=${productId} idempotencyKey=${idempotencyKey ?? '(none)'}`);
+    console.log(`POST /api/purchases user=${userId} product=${productId}`);
 
     if (!userId || !Number.isInteger(productId)) {
         return sendJson(res, 400, {error: 'invalid request'});
     }
     try {
-        const purchased = await createPurchase({userId, productId, comment, idempotencyKey});
+        const purchased = await createPurchase({userId, productId, comment});
         return purchased
             ? res.writeHead(201).end()
             : sendJson(res, 409, {error: 'product unavailable'});
