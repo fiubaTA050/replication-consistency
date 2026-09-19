@@ -1,212 +1,55 @@
 # Replicación y consistencia en sistemas distribuidos
 
-## Dependencias
+Dependencias y secuencia completa de la clase: [`main`](https://github.com/fiubaTA050/replication-consistency/tree/main).
 
-- Docker with Compose v2
-- Node.js 24
+## Parte 3: compras
 
-## Secuencia de la clase
+Servicio `purchases/`: API + UI en `http://localhost:3000` y un tunnel público (cloudflare) para que más personas
+puedan acceder al container. Es un tunnel temporal y gratuito de Cloudflare; en clase no funcionó porque estábamos
+conectados por 4G y Cloudflare devolvía error.
 
-| Parte | Branch | Tema |
-| --- | --- | --- |
-| 1. Replicación asíncrona | `main` | `docker/async` |
-| 2. Replicación síncrona | `main` | `docker/sync` |
-| 3. Compras | `1-basic-service` | sin transaction: inconsistencias |
-|  | `2-basic-service-tx` | transaction + retries en el frontend |
-|  | `3-basic-service-notifications` | I/O dentro de la transaction (dual write) |
-|  | `4-wal-reader` | WAL reader y ACK del LSN |
-|  | `5-basic-service-with-wal-reader` | notifier como consumer del WAL |
-| 4. Idempotencia | `6-basic-service-idempotency` | idempotency key en memoria |
-|  | `7-basic-service-better-idempotency` | idempotency key en la base |
-|  | `8-notification-delivery-semantics` | at-most-once vs at-least-once |
-|  | `9-wal-consumer-order` | consumir el WAL en orden |
-
-Cada branch agrega su sección a este README.
-
-## Parte 1: replicación asíncrona
-
-- Postgres A (primary): port `5432`
-- Postgres B (replica, logical replication): port `5433`
+Comandos comunes (desde `purchases/`):
 
 ```bash
-cd docker/async
+# URL pública del tunnel
+docker compose logs tunnel | grep trycloudflare
+
+# logs del server
+docker compose logs -f app
+
+# psql
+docker exec -it purchases-postgres-1 psql -U postgres -d appdb
+```
+
+Stock vs compras (`stock + compras` debería ser el stock inicial de `initdb/02_products.sql`):
+
+```sql
+SELECT p.id, p.name, p.stock, count(c.id) AS compras
+FROM products p LEFT JOIN purchases c ON c.product_id = p.id
+GROUP BY p.id ORDER BY p.id;
+```
+
+### Branch `1-basic-service`: sin transaction
+
+`createPurchase` descuenta stock y después inserta la compra, sin transaction. Entre los dos writes hay un
+`failRandomly()` (50%).
+
+```bash
+git checkout 1-basic-service
+cd purchases
+npm install
 docker compose up -d
 ```
 
-Dos terminales:
-
-```bash
-# A
-docker exec -it async-postgres-a-1 psql -U postgres -d appdb
-```
-
-```bash
-# B
-docker exec -it async-postgres-b-1 psql -U postgres -d appdb
-```
-
-En B dejamos corriendo:
-
-```sql
-SELECT * FROM items ORDER BY id
-\watch 1
-```
-
-### 1.1 B muerto, A sigue escribiendo
-
-```bash
-docker rm -f async-postgres-b-1
-```
-
-En A (responde sin esperar a B):
-
-```sql
-INSERT INTO items(name) VALUES ('mientras B está muerto');
-```
-
-```bash
-docker compose up -d postgres-b
-```
-
-B recibe los cambios pendientes (volver a abrir el `psql` de B).
-
-### 1.2 A muere con cambios que B no recibió
-
-En A:
-
-```sql
-INSERT INTO items(name) VALUES ('B lo recibe');
-```
-
-```bash
-docker rm -f async-postgres-b-1
-```
-
-En A:
-
-```sql
-INSERT INTO items(name) VALUES ('B no lo recibe');
-UPDATE items SET name = 'actualizado' WHERE id = 1;
-```
-
-```bash
-docker rm -f async-postgres-a-1
-docker compose up -d postgres-b
-```
-
-B no tiene los últimos cambios: están solo en el disco de A.
-
-```bash
-# B intenta reconectarse a A
-docker logs -f async-postgres-b-1
-```
-
-```bash
-docker compose up -d postgres-a
-```
-
-A los ~5s B se reconecta y recibe los cambios.
-
-### 1.3 Notas del docker compose
-
-- `docker rm -f` mata el proceso (SIGKILL) sin graceful shutdown. Los volúmenes quedan, así que al volver a
-  prenderlo recupera los datos confirmados.
-- B no tiene `depends_on` sobre A: con `depends_on`, `docker compose up -d postgres-b` también prende A y no
-  se pueden manejar por separado (el problema que encontramos en clase mientras probábamos).
-- Sin `depends_on`, la primera vez que B arranca `b/00_wait-for-a.sh` espera a que A acepte conexiones antes
-  del `CREATE SUBSCRIPTION`. Después de eso B se reconecta solo cuando A vuelve.
-
-### Conclusión
-
-- A no depende de B: mejor disponibilidad y menor latencia de escritura en A.
-- B es eventualmente consistente.
-- Si A muere antes de replicar y no se recupera, esos datos se pierden.
+1. Comprar varias veces desde la UI.
+2. Cuando falla, el stock bajó pero la compra no existe (ver la query de stock vs compras).
 
 ```bash
 docker compose down -v
-cd ../..
+cd ..
 ```
 
-**Siguiente:** [Parte 2: replicación síncrona](#parte-2-replicación-síncrona)
-
-## Parte 2: replicación síncrona
-
-A espera que B confirme cada `COMMIT` (`synchronous_standby_names = 'FIRST 1 (items_sub)'`).
-
-```bash
-cd docker/sync
-docker compose up -d
-```
-
-Mismas terminales que en la parte 1 (con `\watch 1` en B):
-
-```bash
-# A
-docker exec -it sync-postgres-a-1 psql -U postgres -d appdb
-```
-
-```bash
-# B
-docker exec -it sync-postgres-b-1 psql -U postgres -d appdb
-```
-
-### 2.1 Los datos se replican
-
-En A:
-
-```sql
-INSERT INTO items(name) VALUES ('uno');
-SELECT application_name, sync_state FROM pg_stat_replication;
-```
-
-### 2.2 B muerto: A se bloquea
-
-```bash
-docker rm -f sync-postgres-b-1
-```
-
-En A (queda bloqueado):
-
-```sql
-INSERT INTO items(name) VALUES ('esperando a B');
-```
-
-En otra terminal:
-
-```bash
-docker exec -it sync-postgres-a-1 psql -U postgres -d appdb -c "SELECT pid, wait_event, query FROM pg_stat_activity WHERE wait_event = 'SyncRep'"
-```
-
-### 2.3 B vuelve: A se destraba
-
-```bash
-docker compose up -d postgres-b
-```
-
-El `INSERT` bloqueado termina y B tiene el dato.
-
-> Si se cancela el `INSERT` bloqueado (Ctrl+C), la transaction ya quedó confirmada localmente en A: Postgres
-> solo avisa con un `WARNING`. Desde ese momento el dato se puede consultar en A aunque B no lo tenga (lo recibe
-> cuando vuelve). Mientras el `INSERT` espera a B, las demás sesiones no lo ven.
-
-### Conclusión
-
-- Toda transaction cuyo `COMMIT` fue confirmado al cliente está en A y en B: si A se pierde, B tiene esos datos.
-  Si el `COMMIT` no fue confirmado al cliente, A puede tener datos que B no replicó: si A se pierde, esos datos
-  se pierden.
-- La disponibilidad de escritura en A depende de B (es más baja).
-- La latencia de escritura en A es más alta: cada `COMMIT` espera a B.
-- Limitación implícita de Postgres: para replicar, A primero tiene que confirmar el `COMMIT` en su WAL, así que
-  siempre hay un momento en que A tiene el dato y B no. Si en ese momento se cancela la espera o A se cae, A queda
-  con datos que B no tiene. Sin otras herramientas (ej: consenso entre 3 o más nodos, como Raft) no se puede
-  prometer al 100% que B tenga todo lo que tiene A.
-
-```bash
-docker compose down -v
-cd ../..
-```
-
-**Siguiente:** [`1-basic-service`](https://github.com/fiubaTA050/replication-consistency/tree/1-basic-service)
+**Siguiente:** [`2-basic-service-tx`](https://github.com/fiubaTA050/replication-consistency/tree/2-basic-service-tx)
 
 ---
 
