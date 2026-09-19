@@ -182,6 +182,8 @@ El `INSERT` bloqueado termina y B tiene el dato.
 ### Conclusión
 
 - Toda transaction cuyo `COMMIT` fue confirmado al cliente está en A y en B: si A se pierde, B tiene esos datos.
+  Si el `COMMIT` no fue confirmado al cliente, A puede tener datos que B no replicó: si A se pierde, esos datos
+  se pierden.
 - La disponibilidad de escritura en A depende de B (es más baja).
 - La latencia de escritura en A es más alta: cada `COMMIT` espera a B.
 - Limitación implícita de Postgres: para replicar, A primero tiene que confirmar el `COMMIT` en su WAL, así que
