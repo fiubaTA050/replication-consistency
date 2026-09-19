@@ -5,6 +5,7 @@ const userIdInput = document.getElementById('userId');
 const commentInput = document.getElementById('comment');
 const purchaseDialog = document.getElementById('purchase-dialog');
 const dialogProduct = document.getElementById('dialog-product');
+const dialogKey = document.getElementById('dialog-key');
 const purchaseForm = document.getElementById('purchase-form');
 const attemptsList = document.getElementById('attempts');
 const purchaseButton = document.getElementById('purchase');
@@ -43,6 +44,10 @@ purchaseDialog.addEventListener('cancel', (event) => {
 purchaseDialog.addEventListener('close', () => {
     pending = null;
 });
+
+function newKey() {
+    return crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
 
 function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
@@ -126,13 +131,16 @@ function buy(product) {
         showToast('Escribí tu nombre de usuario');
         return;
     }
+    // una key por compra: todos los reintentos (y "Comprar de nuevo") mandan la misma
     pending = {
         userId,
         productId: product.id,
         productName: product.name,
         comment: null,
+        key: newKey(),
     };
     dialogProduct.textContent = product.name;
+    dialogKey.textContent = pending.key;
     commentInput.value = '';
     commentInput.readOnly = false;
     attemptsList.replaceChildren();
@@ -154,7 +162,10 @@ async function send() {
         try {
             await request('/api/purchases', {
                 method: 'POST',
-                headers: {'content-type': 'application/json'},
+                headers: {
+                    'content-type': 'application/json',
+                    'Idempotency-Key': purchase.key,
+                },
                 body: JSON.stringify({
                     userId: purchase.userId,
                     productId: purchase.productId,

@@ -1,5 +1,7 @@
 import pg from 'pg';
 
+const seenIdempotencyKeys = new Set();
+
 const pool = new pg.Pool({
     host: 'postgres',
     port: 5432,
@@ -33,7 +35,12 @@ export async function listPurchases(userId) {
     return rows;
 }
 
-export async function createPurchase({userId, productId, comment}) {
+export async function createPurchase({userId, productId, comment, idempotencyKey}) {
+    if (idempotencyKey && seenIdempotencyKeys.has(idempotencyKey)) {
+        console.log(`purchase replayed idempotencyKey=${idempotencyKey}`);
+        return true;
+    }
+
     const client = await pool.connect();
     try {
         await client.query('BEGIN ISOLATION LEVEL SERIALIZABLE');
@@ -57,17 +64,20 @@ export async function createPurchase({userId, productId, comment}) {
             [userId, productId, comment || null],
         );
 
-        // si la transaction falla, la compra nunca llega al WAL y no se notifica
-        failRandomly();
-
         await client.query('COMMIT');
-        return true;
     } catch (error) {
         await client.query('ROLLBACK');
         throw error;
     } finally {
         client.release();
     }
+
+    if (idempotencyKey) {
+        seenIdempotencyKeys.add(idempotencyKey);
+    }
+    // la compra ya está confirmada, pero el cliente recibe un error y reintenta
+    failRandomly();
+    return true;
 }
 
 function failRandomly() {
