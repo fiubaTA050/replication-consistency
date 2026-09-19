@@ -4,40 +4,45 @@ Dependencias y secuencia completa de la clase: [`main`](https://github.com/fiuba
 
 ## Parte 3: compras
 
-Comandos comunes (tunnel, logs, psql, query de stock vs compras):
-[`1-basic-service`](https://github.com/fiubaTA050/replication-consistency/tree/1-basic-service#parte-3-compras).
+### Branch `4-wal-reader`: leer el WAL
 
-### Branch `3-basic-service-notifications`: I/O dentro de la transaction
-
-Antes del `COMMIT` se envía la notificación a ntfy y después `failRandomly()`.
+`wal-reader/` se conecta a postgres A (`docker/async`) por logical replication (slot `node_wal_reader`),
+imprime cada cambio y hace ACK del último LSN solo cuando apretamos Enter.
 
 ```bash
-git checkout 3-basic-service-notifications
-cd purchases
+git checkout 4-wal-reader
+cd docker/async
 docker compose up -d
+cd ../../wal-reader
+npm install
+npm start
 ```
 
-Notificaciones: abrir https://ntfy.sh/ta050 (o la app de ntfy suscripta a `ta050`), o:
+En otra terminal, psql en A:
 
 ```bash
-curl -s ntfy.sh/ta050/json
+docker exec -it async-postgres-a-1 psql -U postgres -d appdb
 ```
 
-#### Notificación y transaction no son atómicas
+```sql
+SELECT slot_name, confirmed_flush_lsn, pg_current_wal_lsn() FROM pg_replication_slots;
+```
 
-- Notificación antes del `COMMIT`: si `failRandomly()` falla, llega la notificación pero la compra no existe.
-  Con los retries de la UI llegan varias notificaciones por una sola compra.
-- Notificación después del `COMMIT`: si el proceso falla entre el `COMMIT` y el envío, la compra existe y
-  nunca se notifica.
+1. `INSERT`/`UPDATE`/`DELETE` en `items`: el reader los imprime, pero `confirmed_flush_lsn` no avanza.
+2. Enter en el reader: `ACK <lsn>` y `confirmed_flush_lsn` avanza.
+3. Más cambios, matar el reader sin ACK (Ctrl+C) y volver a correr `npm start`: recibe de nuevo todo lo
+   posterior al último ACK.
 
-No es consistencia eventual: el sistema queda inconsistente para siempre.
+Mientras no hay ACK, A retiene el WAL. Si el reader no responde en `wal_sender_timeout` (120s), A corta la
+conexión (`terminating walsender process due to replication timeout`).
 
 ```bash
+cd ../docker/async
 docker compose down -v
-cd ..
+cd ../..
 ```
 
-**Siguiente:** [`4-wal-reader`](https://github.com/fiubaTA050/replication-consistency/tree/4-wal-reader)
+**Siguiente:** [`5-basic-service-with-wal-reader`](https://github.com/fiubaTA050/replication-consistency/tree/5-basic-service-with-wal-reader)
 
 ---
 
