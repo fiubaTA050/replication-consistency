@@ -109,30 +109,25 @@ A los ~5s B se reconecta y recibe los cambios.
 
 ### 1.3 Notas del docker compose
 
-- `docker rm -f` mata el proceso (SIGKILL) sin shutdown ordenado. Los volúmenes quedan, así que al volver a
+- `docker rm -f` mata el proceso (SIGKILL) sin graceful shutdown. Los volúmenes quedan, así que al volver a
   prenderlo recupera los datos confirmados.
 - B no tiene `depends_on` sobre A: con `depends_on`, `docker compose up -d postgres-b` también prende A y no
-  se pueden manejar por separado.
+  se pueden manejar por separado (el problema que encontramos en clase mientras probábamos).
 - Sin `depends_on`, la primera vez que B arranca `b/00_wait-for-a.sh` espera a que A acepte conexiones antes
   del `CREATE SUBSCRIPTION`. Después de eso B se reconecta solo cuando A vuelve.
-- Si B quedó a medio inicializar (ej: se lo mató durante el init), borrar su volumen y volver a prenderlo:
-
-```bash
-docker rm -f postgres-b
-docker volume rm async_postgres-b-data
-docker compose up -d postgres-b
-```
 
 ### Conclusión
 
 - A no depende de B: mejor disponibilidad y menor latencia de escritura en A.
 - B es eventualmente consistente.
-- Si A muere antes de replicar y no se recupera, esos datos se pierden. Usarlo solo si ese riesgo es aceptable.
+- Si A muere antes de replicar y no se recupera, esos datos se pierden.
 
 ```bash
 docker compose down -v
 cd ../..
 ```
+
+**Siguiente:** [Parte 2: replicación síncrona](#parte-2-replicación-síncrona)
 
 ## Parte 2: replicación síncrona
 
@@ -180,8 +175,9 @@ docker compose up -d postgres-b
 
 El `INSERT` bloqueado termina y B tiene el dato.
 
-> Si se cancela el `INSERT` bloqueado (Ctrl+C), Postgres avisa que la transaction ya quedó confirmada
-> localmente en A: el cliente no sabe si se replicó.
+> Si se cancela el `INSERT` bloqueado (Ctrl+C), la transaction ya quedó confirmada localmente en A: Postgres
+> solo avisa con un `WARNING`. Desde ese momento el dato se puede consultar en A aunque B no lo tenga (lo recibe
+> cuando vuelve). Mientras el `INSERT` espera a B, las demás sesiones no lo ven.
 
 ### Conclusión
 
@@ -193,3 +189,10 @@ El `INSERT` bloqueado termina y B tiene el dato.
 docker compose down -v
 cd ../..
 ```
+
+**Siguiente:** [`1-basic-service`](https://github.com/fiubaTA050/replication-consistency/tree/1-basic-service)
+
+---
+
+Branches que usamos originalmente en clase: [`notifyier`](https://github.com/fiubaTA050/replication-consistency/tree/notifyier),
+[`idempotencia`](https://github.com/fiubaTA050/replication-consistency/tree/idempotencia) y [`buena-idempotencia`](https://github.com/fiubaTA050/replication-consistency/tree/buena-idempotencia).
