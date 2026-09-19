@@ -5,74 +5,191 @@
 - Docker with Compose v2
 - Node.js 24
 
-## Postgres Replication
+## Secuencia de la clase
 
-Docker compose:
+| Parte | Branch | Tema |
+| --- | --- | --- |
+| 1. Replicación asíncrona | `main` | `docker/async` |
+| 2. Replicación síncrona | `main` | `docker/sync` |
+| 3. Compras | `1-basic-service` | sin transaction: inconsistencias |
+|  | `2-basic-service-tx` | transaction + retries en el frontend |
+|  | `3-basic-service-notifications` | I/O dentro de la transaction (dual write) |
+|  | `4-wal-reader` | WAL reader y ACK del LSN |
+|  | `5-basic-service-with-wal-reader` | notifier como consumer del WAL |
+| 4. Idempotencia | `6-basic-service-idempotency` | idempotency key en memoria |
+|  | `7-basic-service-better-idempotency` | idempotency key en la base |
+|  | `8-notification-delivery-semantics` | at-most-once vs at-least-once |
+|  | `9-wal-consumer-order` | consumir el WAL en orden |
+
+Cada branch agrega su sección a este README.
+
+## Parte 1: replicación asíncrona
 
 - Postgres A (primary): port `5432`
-- Postgres B (replica): port `5433`
+- Postgres B (replica, logical replication): port `5433`
 
 ```bash
-# start all containers
-docker compose up
-
-# stop a container without deleting the data
-docker rm -f postgres-b
-
-# repair all containers (restart the killed containers)
+cd docker/async
 docker compose up -d
-
-# stop all containers and remove data
-docker compose down -v --remove-orphans
 ```
 
-### Interactive queries
+Dos terminales:
 
 ```bash
-# primary
-docker exec -ti postgres-a psql -U postgres -d appdb
-# replica
-docker exec -ti postgres-b psql -U postgres -d appdb
+# A
+docker exec -it postgres-a psql -U postgres -d appdb
 ```
 
-#### Data queries
-
-```sql
-INSERT INTO items(name) VALUES ('some name');
+```bash
+# B
+docker exec -it postgres-b psql -U postgres -d appdb
 ```
 
-```sql
-UPDATE items SET name = 'new name' WHERE id = 1;
-```
-
-#### Watch items
+En B dejamos corriendo:
 
 ```sql
-SELECT * FROM items
+SELECT * FROM items ORDER BY id
 \watch 1
 ```
 
-## Server
+### 1.1 B muerto, A sigue escribiendo
 
+```bash
+docker rm -f postgres-b
 ```
-cd purchases
-# start the server
+
+En A (responde sin esperar a B):
+
+```sql
+INSERT INTO items(name) VALUES ('mientras B está muerto');
+```
+
+```bash
+docker compose up -d postgres-b
+```
+
+B recibe los cambios pendientes (volver a abrir el `psql` de B).
+
+### 1.2 A muere con cambios que B no recibió
+
+En A:
+
+```sql
+INSERT INTO items(name) VALUES ('B lo recibe');
+```
+
+```bash
+docker rm -f postgres-b
+```
+
+En A:
+
+```sql
+INSERT INTO items(name) VALUES ('B no lo recibe');
+UPDATE items SET name = 'actualizado' WHERE id = 1;
+```
+
+```bash
+docker rm -f postgres-a
+docker compose up -d postgres-b
+```
+
+B no tiene los últimos cambios: están solo en el disco de A.
+
+```bash
+# B intenta reconectarse a A
+docker logs -f postgres-b
+```
+
+```bash
+docker compose up -d postgres-a
+```
+
+A los ~5s B se reconecta y recibe los cambios.
+
+### 1.3 Notas del docker compose
+
+- `docker rm -f` mata el proceso (SIGKILL) sin shutdown ordenado. Los volúmenes quedan, así que al volver a
+  prenderlo recupera los datos confirmados.
+- B no tiene `depends_on` sobre A: con `depends_on`, `docker compose up -d postgres-b` también prende A y no
+  se pueden manejar por separado.
+- Sin `depends_on`, la primera vez que B arranca `b/00_wait-for-a.sh` espera a que A acepte conexiones antes
+  del `CREATE SUBSCRIPTION`. Después de eso B se reconecta solo cuando A vuelve.
+- Si B quedó a medio inicializar (ej: se lo mató durante el init), borrar su volumen y volver a prenderlo:
+
+```bash
+docker rm -f postgres-b
+docker volume rm async_postgres-b-data
+docker compose up -d postgres-b
+```
+
+### Conclusión
+
+- A no depende de B: mejor disponibilidad y menor latencia de escritura en A.
+- B es eventualmente consistente.
+- Si A muere antes de replicar y no se recupera, esos datos se pierden. Usarlo solo si ese riesgo es aceptable.
+
+```bash
+docker compose down -v
+cd ../..
+```
+
+## Parte 2: replicación síncrona
+
+A espera que B confirme cada `COMMIT` (`synchronous_standby_names = 'FIRST 1 (items_sub)'`).
+
+```bash
+cd docker/sync
 docker compose up -d
-
-# restart the app after some code changes
-docker compose restart app
-
-# kill the server and data
-docker compose down -v --remove-orphans
-
-# query the db
-docker exec -it purchases-postgres psql -U postgres -d appdb
 ```
 
-## WAL reader
+Mismas terminales de A y B que en la parte 1 (con `\watch 1` en B).
 
-`wal-reader/` opens a logical replication connection to **postgres A**, prints
-every decoded WAL record to stdout, and **acknowledges only when you tell it to** from stdin.
+### 2.1 Los datos se replican
 
-If the consumer takes more than `wal_sender_timeout` to acknowledge the LSN (or send a heartbeat),
-the Postgres server will kill the connection (`terminating walsender process due to replication timeout`).
+En A:
+
+```sql
+INSERT INTO items(name) VALUES ('uno');
+SELECT application_name, sync_state FROM pg_stat_replication;
+```
+
+### 2.2 B muerto: A se bloquea
+
+```bash
+docker rm -f postgres-b
+```
+
+En A (queda bloqueado):
+
+```sql
+INSERT INTO items(name) VALUES ('esperando a B');
+```
+
+En otra terminal:
+
+```bash
+docker exec -it postgres-a psql -U postgres -d appdb -c "SELECT pid, wait_event, query FROM pg_stat_activity WHERE wait_event = 'SyncRep'"
+```
+
+### 2.3 B vuelve: A se destraba
+
+```bash
+docker compose up -d postgres-b
+```
+
+El `INSERT` bloqueado termina y B tiene el dato.
+
+> Si se cancela el `INSERT` bloqueado (Ctrl+C), Postgres avisa que la transaction ya quedó confirmada
+> localmente en A: el cliente no sabe si se replicó.
+
+### Conclusión
+
+- Toda transaction confirmada está en A y en B: si A se pierde, B tiene todos los datos.
+- La disponibilidad de escritura en A depende de B (es más baja).
+- La latencia de escritura en A es más alta: cada `COMMIT` espera a B.
+
+```bash
+docker compose down -v
+cd ../..
+```

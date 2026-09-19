@@ -14,13 +14,6 @@ services:
     volumes:
       - postgres-a-data:/var/lib/postgresql/data
       - ./a:/docker-entrypoint-initdb.d:ro
-    healthcheck:
-      # "healthy" only once the init scripts finished
-      test: pg_isready -U postgres -d appdb
-      interval: 1s
-      timeout: 5s
-      retries: 5
-      start_period: 1s
 
   postgres-b:
     container_name: postgres-b
@@ -35,11 +28,10 @@ services:
     volumes:
       - postgres-b-data:/var/lib/postgresql/data
       - ./b:/docker-entrypoint-initdb.d:ro
-    depends_on:
-      postgres-a:
-        condition: service_healthy
+    # Sin depends_on: A y B se prenden y apagan de forma independiente.
+    # La primera vez, b/00_wait-for-a.sh espera a A antes de crear la subscription.
 
-# Named volumes: they survive `stop`/`start` and are removed by `down -v`,
+# Los volúmenes sobreviven a `docker rm -f` y se borran con `down -v`
 volumes:
   postgres-a-data:
   postgres-b-data:
