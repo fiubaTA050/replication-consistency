@@ -1,7 +1,5 @@
 import pg from 'pg';
 
-const seenIdempotencyKeys = new Set();
-
 const pool = new pg.Pool({
     host: 'postgres',
     port: 5432,
@@ -36,11 +34,6 @@ export async function listPurchases(userId) {
 }
 
 export async function createPurchase({userId, productId, comment, idempotencyKey}) {
-    if (idempotencyKey && seenIdempotencyKeys.has(idempotencyKey)) {
-        console.log(`purchase replayed idempotencyKey=${idempotencyKey}`);
-        return true;
-    }
-
     const client = await pool.connect();
     try {
         await client.query('BEGIN ISOLATION LEVEL SERIALIZABLE');
@@ -60,21 +53,23 @@ export async function createPurchase({userId, productId, comment, idempotencyKey
         );
 
         await client.query(
-            'INSERT INTO purchases (user_id, product_id, comment) VALUES ($1, $2, $3)',
-            [userId, productId, comment || null],
+            'INSERT INTO purchases (user_id, product_id, comment, idempotency_key) VALUES ($1, $2, $3, $4)',
+            [userId, productId, comment || null, idempotencyKey || null],
         );
 
         await client.query('COMMIT');
     } catch (error) {
         await client.query('ROLLBACK');
+        // la key ya existe: la compra se hizo en un intento anterior
+        if (error.code === '23505' && error.constraint === 'purchases_idempotency_key_uniq') {
+            console.log(`purchase replayed idempotencyKey=${idempotencyKey}`);
+            return true;
+        }
         throw error;
     } finally {
         client.release();
     }
 
-    if (idempotencyKey) {
-        seenIdempotencyKeys.add(idempotencyKey);
-    }
     // la compra ya está confirmada, pero el cliente recibe un error y reintenta
     failRandomly();
     return true;
