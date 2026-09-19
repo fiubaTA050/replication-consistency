@@ -181,9 +181,13 @@ El `INSERT` bloqueado termina y B tiene el dato.
 
 ### Conclusión
 
-- Toda transaction confirmada está en A y en B: si A se pierde, B tiene todos los datos.
+- Toda transaction cuyo `COMMIT` fue confirmado al cliente está en A y en B: si A se pierde, B tiene esos datos.
 - La disponibilidad de escritura en A depende de B (es más baja).
 - La latencia de escritura en A es más alta: cada `COMMIT` espera a B.
+- Limitación implícita de Postgres: para replicar, A primero tiene que confirmar el `COMMIT` en su WAL, así que
+  siempre hay un momento en que A tiene el dato y B no. Si en ese momento se cancela la espera o A se cae, A queda
+  con datos que B no tiene. Sin otras herramientas (ej: consenso entre 3 o más nodos, como Raft) no se puede
+  prometer al 100% que B tenga todo lo que tiene A.
 
 ```bash
 docker compose down -v
