@@ -1,6 +1,8 @@
 import pg from 'pg';
 import {LogicalReplicationService, PgoutputPlugin} from 'pg-logical-replication';
 
+const MAX_ATTEMPTS = 3;
+
 const connection = {
     host: 'postgres',
     port: 5432,
@@ -31,7 +33,7 @@ service.on('data', async (lsn, event) => {
 
 async function handle(lsn, event) {
     if (event.tag === 'insert') {
-        await notify(event.new);
+        await notifyAtLeastOnce(event.new);
         processed++;
     }
     // "por eficiencia" solo confirmamos cada 10 compras (en el commit de la transaction)
@@ -39,6 +41,29 @@ async function handle(lsn, event) {
         await service.acknowledge(lsn);
         console.log(`ACK ${lsn} after ${processed} purchases`);
     }
+}
+
+async function notifyAtLeastOnce(purchase) {
+    // el intento se registra antes de enviar: si el proceso muere, igual cuenta
+    const attempts = await registerAttempt(purchase);
+    if (attempts > MAX_ATTEMPTS) {
+        console.log(`purchase=${purchase.id} skipped: ${MAX_ATTEMPTS} attempts reached`);
+        return;
+    }
+    await notify(purchase);
+    // enviada pero sin ACK: al reiniciar se vuelve a enviar
+    failRandomly();
+}
+
+async function registerAttempt(purchase) {
+    const {rows} = await pool.query(
+        `INSERT INTO notification_attempts (purchase_id, attempts)
+         VALUES ($1, 1)
+         ON CONFLICT (purchase_id) DO UPDATE SET attempts = notification_attempts.attempts + 1
+         RETURNING attempts`,
+        [purchase.id],
+    );
+    return rows[0].attempts;
 }
 
 async function notify(purchase) {
@@ -63,6 +88,12 @@ async function getProduct(productId) {
         [productId],
     );
     return rows[0];
+}
+
+function failRandomly() {
+    if (Math.random() < 0.3) {
+        throw new Error('random failure');
+    }
 }
 
 function crash(error) {
