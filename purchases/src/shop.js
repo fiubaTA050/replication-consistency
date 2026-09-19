@@ -36,11 +36,14 @@ export async function listPurchases(userId) {
 export async function createPurchase({userId, productId, comment}) {
     const client = await pool.connect();
     try {
+        await client.query('BEGIN ISOLATION LEVEL SERIALIZABLE');
+
         const {rows: products} = await client.query(
             'SELECT id, name, price, stock FROM products WHERE id = $1',
             [productId],
         );
         if (products.length === 0 || products[0].stock <= 0) {
+            await client.query('ROLLBACK');
             return false;
         }
 
@@ -56,7 +59,11 @@ export async function createPurchase({userId, productId, comment}) {
             [userId, productId, comment || null],
         );
 
+        await client.query('COMMIT');
         return true;
+    } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
     } finally {
         client.release();
     }

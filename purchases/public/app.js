@@ -1,8 +1,14 @@
+const MAX_ATTEMPTS = 3;
+const RETRY_DELAY = 1000;
+
 const userIdInput = document.getElementById('userId');
 const commentInput = document.getElementById('comment');
-const commentDialog = document.getElementById('comment-dialog');
+const purchaseDialog = document.getElementById('purchase-dialog');
 const dialogProduct = document.getElementById('dialog-product');
-const commentForm = document.getElementById('comment-form');
+const purchaseForm = document.getElementById('purchase-form');
+const attemptsList = document.getElementById('attempts');
+const purchaseButton = document.getElementById('purchase');
+const cancelButton = document.getElementById('cancel');
 const productsList = document.getElementById('products');
 const purchasesList = document.getElementById('purchases');
 const productsStatus = document.getElementById('products-status');
@@ -10,6 +16,8 @@ const purchasesStatus = document.getElementById('purchases-status');
 const refreshButton = document.getElementById('refresh');
 const toast = document.getElementById('toast');
 
+let pending = null;
+let sending = false;
 let toastTimer = null;
 
 userIdInput.value = localStorage.getItem('userId') ?? '';
@@ -20,6 +28,25 @@ userIdInput.addEventListener('input', () => {
 });
 
 refreshButton.addEventListener('click', loadPurchases);
+
+purchaseForm.addEventListener('submit', (event) => {
+    if (event.submitter?.value === 'ok') {
+        event.preventDefault();
+        send();
+    }
+});
+purchaseDialog.addEventListener('cancel', (event) => {
+    if (sending) {
+        event.preventDefault();
+    }
+});
+purchaseDialog.addEventListener('close', () => {
+    pending = null;
+});
+
+function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 function showToast(message) {
     toast.textContent = message;
@@ -36,6 +63,18 @@ function formatPrice(price) {
 
 function count(total, singular, plural) {
     return `${total} ${total === 1 ? singular : plural}`;
+}
+
+function logAttempt(message) {
+    const entry = document.createElement('li');
+    entry.textContent = `${new Date().toLocaleTimeString('es-AR')} · ${message}`;
+    attemptsList.append(entry);
+}
+
+function setSending(value) {
+    sending = value;
+    purchaseButton.disabled = value;
+    cancelButton.disabled = value;
 }
 
 async function request(path, options) {
@@ -80,37 +119,64 @@ function renderProduct(product) {
     return item;
 }
 
-function askComment(product) {
-    dialogProduct.textContent = product.name;
-    commentInput.value = '';
-    commentDialog.showModal();
-    return new Promise((resolve) => {
-        commentForm.onsubmit = (event) => resolve(event.submitter.value === 'ok' ? commentInput.value.trim() : null);
-        commentDialog.oncancel = () => resolve(null);
-    });
-}
-
-async function buy(product) {
+function buy(product) {
     const userId = userIdInput.value.trim();
     if (!userId) {
         userIdInput.focus();
         showToast('Escribí tu nombre de usuario');
         return;
     }
-    const comment = await askComment(product);
-    if (comment === null) {
+    pending = {
+        userId,
+        productId: product.id,
+        productName: product.name,
+        comment: null,
+    };
+    dialogProduct.textContent = product.name;
+    commentInput.value = '';
+    commentInput.readOnly = false;
+    attemptsList.replaceChildren();
+    purchaseButton.textContent = 'Confirmar compra';
+    setSending(false);
+    purchaseDialog.showModal();
+}
+
+async function send() {
+    const purchase = pending;
+    if (!purchase || sending) {
         return;
     }
-    try {
-        await request('/api/purchases', {
-            method: 'POST',
-            headers: {'content-type': 'application/json'},
-            body: JSON.stringify({userId, productId: product.id, comment}),
-        });
-        showToast(`Compraste ${product.name}`);
-    } catch (error) {
-        showToast(`No se pudo completar la compra: ${error.message}`);
+    purchase.comment ??= commentInput.value.trim();
+    commentInput.readOnly = true;
+    setSending(true);
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+        logAttempt(`Intento ${attempt} de ${MAX_ATTEMPTS}…`);
+        try {
+            await request('/api/purchases', {
+                method: 'POST',
+                headers: {'content-type': 'application/json'},
+                body: JSON.stringify({
+                    userId: purchase.userId,
+                    productId: purchase.productId,
+                    comment: purchase.comment,
+                }),
+            });
+            showToast(`Compraste ${purchase.productName}`);
+            setSending(false);
+            purchaseDialog.close();
+            await Promise.all([loadProducts(), loadPurchases()]);
+            return;
+        } catch (error) {
+            logAttempt(`Intento ${attempt}: ${error.message}`);
+            if (attempt < MAX_ATTEMPTS) {
+                await sleep(RETRY_DELAY);
+            }
+        }
     }
+    logAttempt(`Se agotaron los ${MAX_ATTEMPTS} intentos`);
+    showToast('No se pudo completar la compra');
+    purchaseButton.textContent = 'Comprar de nuevo';
+    setSending(false);
     await Promise.all([loadProducts(), loadPurchases()]);
 }
 
