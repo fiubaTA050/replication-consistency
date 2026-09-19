@@ -14,7 +14,8 @@ const pool = new pg.Pool(connection);
 
 const service = new LogicalReplicationService(connection, {
     acknowledge: {auto: false, timeoutSeconds: 0},
-    flowControl: {enabled: false},
+    // no pasa al siguiente evento hasta que termine el listener del actual
+    flowControl: {enabled: true},
 });
 const plugin = new PgoutputPlugin({
     protoVersion: 2,
