@@ -7,26 +7,37 @@ Dependencias y secuencia completa de la clase: [`main`](https://github.com/fiuba
 Comandos comunes (tunnel, logs, psql, query de stock vs compras):
 [`1-basic-service`](https://github.com/fiubaTA050/replication-consistency/tree/1-basic-service#parte-3-compras).
 
-### Branch `2-basic-service-tx`: transaction + retries
+### Branch `3-basic-service-notifications`: I/O dentro de la transaction
 
-Los dos writes van en una transaction: si `failRandomly()` falla, `ROLLBACK` y la API responde `500`.
-La UI reintenta hasta 3 veces (y "Comprar de nuevo" vuelve a intentar).
+Antes del `COMMIT` se envía la notificación a ntfy y después `failRandomly()`.
 
 ```bash
-git checkout 2-basic-service-tx
+git checkout 3-basic-service-notifications
 cd purchases
 docker compose up -d
 ```
 
-1. Comprar varias veces: en el diálogo se ven los intentos fallidos y los reintentos.
-2. Stock y compras siempre coinciden (query de stock vs compras).
+Notificaciones: abrir https://ntfy.sh/ta050 (o la app de ntfy suscripta a `ta050`), o:
+
+```bash
+curl -s ntfy.sh/ta050/json
+```
+
+#### Notificación y transaction no son atómicas
+
+- Notificación antes del `COMMIT`: si `failRandomly()` falla, llega la notificación pero la compra no existe.
+  Con los retries de la UI llegan varias notificaciones por una sola compra.
+- Notificación después del `COMMIT`: si el proceso falla entre el `COMMIT` y el envío, la compra existe y
+  nunca se notifica.
+
+No es consistencia eventual: el sistema queda inconsistente para siempre.
 
 ```bash
 docker compose down -v
 cd ..
 ```
 
-**Siguiente:** [`3-basic-service-notifications`](https://github.com/fiubaTA050/replication-consistency/tree/3-basic-service-notifications)
+**Siguiente:** [`4-wal-reader`](https://github.com/fiubaTA050/replication-consistency/tree/4-wal-reader)
 
 ---
 
