@@ -1,6 +1,5 @@
 services:
   postgres-a:
-    container_name: postgres-a
     image: postgres:17-alpine
     environment:
       POSTGRES_USER: postgres
@@ -16,7 +15,6 @@ services:
       - ./a:/docker-entrypoint-initdb.d:ro
 
   postgres-b:
-    container_name: postgres-b
     image: postgres:17-alpine
     environment:
       POSTGRES_USER: postgres

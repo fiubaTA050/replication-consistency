@@ -37,12 +37,12 @@ Dos terminales:
 
 ```bash
 # A
-docker exec -it postgres-a psql -U postgres -d appdb
+docker exec -it async-postgres-a-1 psql -U postgres -d appdb
 ```
 
 ```bash
 # B
-docker exec -it postgres-b psql -U postgres -d appdb
+docker exec -it async-postgres-b-1 psql -U postgres -d appdb
 ```
 
 En B dejamos corriendo:
@@ -55,7 +55,7 @@ SELECT * FROM items ORDER BY id
 ### 1.1 B muerto, A sigue escribiendo
 
 ```bash
-docker rm -f postgres-b
+docker rm -f async-postgres-b-1
 ```
 
 En A (responde sin esperar a B):
@@ -79,7 +79,7 @@ INSERT INTO items(name) VALUES ('B lo recibe');
 ```
 
 ```bash
-docker rm -f postgres-b
+docker rm -f async-postgres-b-1
 ```
 
 En A:
@@ -90,7 +90,7 @@ UPDATE items SET name = 'actualizado' WHERE id = 1;
 ```
 
 ```bash
-docker rm -f postgres-a
+docker rm -f async-postgres-a-1
 docker compose up -d postgres-b
 ```
 
@@ -98,7 +98,7 @@ B no tiene los últimos cambios: están solo en el disco de A.
 
 ```bash
 # B intenta reconectarse a A
-docker logs -f postgres-b
+docker logs -f async-postgres-b-1
 ```
 
 ```bash
@@ -138,7 +138,17 @@ cd docker/sync
 docker compose up -d
 ```
 
-Mismas terminales de A y B que en la parte 1 (con `\watch 1` en B).
+Mismas terminales que en la parte 1 (con `\watch 1` en B):
+
+```bash
+# A
+docker exec -it sync-postgres-a-1 psql -U postgres -d appdb
+```
+
+```bash
+# B
+docker exec -it sync-postgres-b-1 psql -U postgres -d appdb
+```
 
 ### 2.1 Los datos se replican
 
@@ -152,7 +162,7 @@ SELECT application_name, sync_state FROM pg_stat_replication;
 ### 2.2 B muerto: A se bloquea
 
 ```bash
-docker rm -f postgres-b
+docker rm -f sync-postgres-b-1
 ```
 
 En A (queda bloqueado):
@@ -164,7 +174,7 @@ INSERT INTO items(name) VALUES ('esperando a B');
 En otra terminal:
 
 ```bash
-docker exec -it postgres-a psql -U postgres -d appdb -c "SELECT pid, wait_event, query FROM pg_stat_activity WHERE wait_event = 'SyncRep'"
+docker exec -it sync-postgres-a-1 psql -U postgres -d appdb -c "SELECT pid, wait_event, query FROM pg_stat_activity WHERE wait_event = 'SyncRep'"
 ```
 
 ### 2.3 B vuelve: A se destraba
