@@ -57,10 +57,7 @@ export async function createPurchase({userId, productId, comment}) {
             [userId, productId, comment || null],
         );
 
-        // I/O dentro de la transaction: la conexión y los locks quedan tomados mientras esperamos a ntfy
-        await notify(userId, products[0], comment);
-
-        // notificación enviada, pero la transaction todavía puede fallar
+        // si la transaction falla, la compra nunca llega al WAL y no se notifica
         failRandomly();
 
         await client.query('COMMIT');
@@ -76,19 +73,6 @@ export async function createPurchase({userId, productId, comment}) {
 function failRandomly() {
     if (Math.random() < 0.5) {
         throw new Error('random failure');
-    }
-}
-
-async function notify(userId, product, comment) {
-    const detail = comment ? ` - ${comment}` : '';
-    const response = await fetch('https://ntfy.sh/ta050', {
-        method: 'POST',
-        headers: {Title: 'Nueva compra', Tags: 'shopping_cart'},
-        body: `${userId} compro ${product.name} ($${product.price})${detail}`,
-        signal: AbortSignal.timeout(5000),
-    });
-    if (!response.ok) {
-        throw new Error(`ntfy respondio ${response.status}`);
     }
 }
 

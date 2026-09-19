@@ -4,45 +4,53 @@ Dependencias y secuencia completa de la clase: [`main`](https://github.com/fiuba
 
 ## Parte 3: compras
 
-### Branch `4-wal-reader`: leer el WAL
+Comandos comunes (tunnel, logs, psql, query de stock vs compras):
+[`1-basic-service`](https://github.com/fiubaTA050/replication-consistency/tree/1-basic-service#parte-3-compras).
 
-`wal-reader/` se conecta a postgres A (`docker/async`) por logical replication (slot `node_wal_reader`),
-imprime cada cambio y hace ACK del último LSN solo cuando apretamos Enter.
+### Branch `5-basic-service-with-wal-reader`: notifier
+
+La API solo escribe en la base. `src/notifier.js` es un proceso aparte (service `notifier`) que consume el
+WAL (publication `purchases_pub`, slot `purchases_notifier`, creados en `initdb/03_replication.sql`) y envía
+una notificación por cada `INSERT` en `purchases`. Hace ACK cada 10 compras: en escenarios realistas, hacer ACK
+por cada transaction es poco performante.
 
 ```bash
-git checkout 4-wal-reader
-cd docker/async
-docker compose up -d
-cd ../../wal-reader
+git checkout 5-basic-service-with-wal-reader
+cd purchases
 npm install
-npm start
+docker compose up -d
+docker compose logs -f notifier
 ```
 
-En otra terminal, psql en A:
+1. Comprar: solo se notifican las compras confirmadas (las que hicieron `ROLLBACK` nunca llegan al WAL).
+2. Con menos de 10 compras desde el último ACK, matar el notifier:
 
 ```bash
-docker exec -it async-postgres-a-1 psql -U postgres -d appdb
+docker rm -f purchases-notifier-1
+docker compose up -d notifier
+```
+
+Se reenvían las notificaciones posteriores al último ACK: no se pierden, pero se duplican.
+
+El ACK se hace con el LSN del `COMMIT`, no del `INSERT`: Postgres reenvía entera toda transaction cuyo `COMMIT`
+no fue confirmado. Un ACK a mitad de una transaction equivale a confirmar el `COMMIT` de la transaction anterior,
+y al reiniciar la transaction se repite completa (no llegamos a mostrarlo en clase):
+
+```
+BEGIN  INSERT tx2-a  INSERT tx2-b (ACK)  COMMIT   -> al reiniciar llega tx2 entera
+BEGIN  INSERT tx2-a  INSERT tx2-b  COMMIT (ACK)   -> al reiniciar no llega nada
 ```
 
 ```sql
 SELECT slot_name, confirmed_flush_lsn, pg_current_wal_lsn() FROM pg_replication_slots;
 ```
 
-1. `INSERT`/`UPDATE`/`DELETE` en `items`: el reader los imprime, pero `confirmed_flush_lsn` no avanza.
-2. Enter en el reader: `ACK <lsn>` y `confirmed_flush_lsn` avanza.
-3. Más cambios, matar el reader sin ACK (Ctrl+C) y volver a correr `npm start`: recibe de nuevo todo lo
-   posterior al último ACK.
-
-Mientras no hay ACK, A retiene el WAL. Si el reader no responde en `wal_sender_timeout` (120s), A corta la
-conexión (`terminating walsender process due to replication timeout`).
-
 ```bash
-cd ../docker/async
 docker compose down -v
-cd ../..
+cd ..
 ```
 
-**Siguiente:** [`5-basic-service-with-wal-reader`](https://github.com/fiubaTA050/replication-consistency/tree/5-basic-service-with-wal-reader)
+**Siguiente:** [`6-basic-service-idempotency`](https://github.com/fiubaTA050/replication-consistency/tree/6-basic-service-idempotency)
 
 ---
 
